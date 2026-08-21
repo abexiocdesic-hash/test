@@ -1,9 +1,6 @@
 const express = require('express');
 
 const app = express();
-
-
-
 // start app on port 1111
 
 
