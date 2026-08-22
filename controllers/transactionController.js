@@ -14,6 +14,41 @@ const createTransaction = async (req, res, next) => {
       status
     } = req.body;
 
+    // Find the account first
+    const accountRecord = await Account.findById(account);
+
+    if (!accountRecord) {
+      return res.status(404).json({
+        message: 'Account not found'
+      });
+    }
+
+    // Validate amount
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        message: 'Transaction amount must be greater than zero'
+      });
+    }
+
+    // Check withdrawal balance before creating transaction
+    if (type === 'WITHDRAWAL' && accountRecord.balance < amount) {
+      return res.status(400).json({
+        message: 'Insufficient account balance'
+      });
+    }
+
+    // Update account balance
+    if (type === 'DEPOSIT') {
+      accountRecord.balance += amount;
+    }
+
+    if (type === 'WITHDRAWAL') {
+      accountRecord.balance -= amount;
+    }
+
+    await accountRecord.save();
+
+    // Create transaction
     const transaction = await Transaction.create({
       transactionId,
       account,
@@ -23,31 +58,6 @@ const createTransaction = async (req, res, next) => {
       description,
       status
     });
-
-    // Update account balance
-    const accountRecord = await Account.findById(account);
-
-    if (!accountRecord) {
-      return res.status(404).json({
-        message: 'Account not found'
-      });
-    }
-
-    if (type === 'DEPOSIT') {
-      accountRecord.balance += amount;
-    }
-
-    if (type === 'WITHDRAWAL') {
-      if (accountRecord.balance < amount) {
-        return res.status(400).json({
-          message: 'Insufficient account balance'
-        });
-      }
-
-      accountRecord.balance -= amount;
-    }
-
-    await accountRecord.save();
 
     const populatedTransaction = await Transaction
       .findById(transaction._id)
