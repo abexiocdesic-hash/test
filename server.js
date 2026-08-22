@@ -3,10 +3,12 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 
 const connectDB = require('./config/database');
+const accountRoutes = require('./routes/accountRoutes');
 
 // Load environment variables
 dotenv.config();
 
+// Initialize Express
 const app = express();
 
 // Middleware
@@ -14,15 +16,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Connect to database
+// Connect to MongoDB
 connectDB();
 
 // Routes
-const accountRoutes = require('./routes/accountRoutes');
-const transactionRoutes = require('./routes/transactionRoutes');
-
 app.use('/api/accounts', accountRoutes);
-app.use('/api/transactions', transactionRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -43,6 +41,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Start server
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
