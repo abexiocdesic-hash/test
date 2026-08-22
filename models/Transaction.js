@@ -15,6 +15,14 @@ const transactionSchema = new mongoose.Schema(
       required: true
     },
 
+    destinationAccount: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Account',
+      required: function () {
+        return this.type === 'TRANSFER';
+      }
+    },
+
     type: {
       type: String,
       enum: ['DEPOSIT', 'WITHDRAWAL', 'TRANSFER'],
@@ -46,9 +54,7 @@ const transactionSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: 
-    true
+    timestamps: true
   }
 );
-
 module.exports = mongoose.model('Transaction', transactionSchema);

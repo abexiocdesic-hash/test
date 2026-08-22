@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const Account = require('../models/Account');
 
@@ -7,6 +8,7 @@ const createTransaction = async (req, res, next) => {
     const {
       transactionId,
       account,
+      destinationAccount,
       type,
       amount,
       currency,
@@ -14,7 +16,135 @@ const createTransaction = async (req, res, next) => {
       status
     } = req.body;
 
-    // Find the account first
+    // Validate account ID
+if (!mongoose.Types.ObjectId.isValid(account)) {
+  return res.status(400).json({
+    message: 'Invalid source account ID'
+  });
+}
+
+// Validate destination account ID for transfers
+if (
+  type === 'TRANSFER' &&
+  !mongoose.Types.ObjectId.isValid(destinationAccount)
+) {
+  return res.status(400).json({
+    message: 'Invalid destination account ID'
+  });
+}
+   // Validate amount
+if (
+  typeof amount !== 'number' ||
+  !Number.isFinite(amount) ||
+  amount <= 0
+) {
+  return res.status(400).json({
+    message: 'Transaction amount must be a positive number'
+  });
+}
+
+    // Validate transaction type
+    const allowedTypes = ['DEPOSIT', 'WITHDRAWAL', 'TRANSFER'];
+
+    if (!allowedTypes.includes(type)) {
+      return res.status(400).json({
+        message: 'Invalid transaction type'
+      });
+    }
+
+    // TRANSFER
+    if (type === 'TRANSFER') {
+      const session = await mongoose.startSession();
+
+      try {
+        let createdTransaction;
+
+        await session.withTransaction(async () => {
+          const sourceAccount = await Account.findById(account)
+            .session(session);
+
+          if (!sourceAccount) {
+            const error = new Error('Source account not found');
+            error.status = 404;
+            throw error;
+          }
+
+          if (!destinationAccount) {
+            const error = new Error(
+              'Destination account is required for transfers'
+            );
+            error.status = 400;
+            throw error;
+          }
+
+          if (account.toString() === destinationAccount.toString()) {
+            const error = new Error(
+              'Source and destination accounts must be different'
+            );
+            error.status = 400;
+            throw error;
+          }
+
+          const targetAccount = await Account.findById(destinationAccount)
+            .session(session);
+
+          if (!targetAccount) {
+            const error = new Error(
+              'Destination account not found'
+            );
+            error.status = 404;
+            throw error;
+          }
+
+          if (sourceAccount.balance < amount) {
+            const error = new Error(
+              'Insufficient account balance'
+            );
+            error.status = 400;
+            throw error;
+          }
+
+          // Update both balances
+          sourceAccount.balance -= amount;
+          targetAccount.balance += amount;
+
+          await sourceAccount.save({ session });
+          await targetAccount.save({ session });
+
+          // Create transaction record
+          const transactions = await Transaction.create(
+            [{
+              transactionId,
+              account,
+              destinationAccount,
+              type,
+              amount,
+              currency,
+              description,
+              status
+            }],
+            { session }
+          );
+
+          createdTransaction = transactions[0];
+        });
+
+        const populatedTransaction = await Transaction
+          .findById(createdTransaction._id)
+          .populate('account')
+          .populate('destinationAccount');
+
+        return res.status(201).json({
+          message: 'Transfer completed successfully',
+          transaction: populatedTransaction
+        });
+
+      } finally {
+        await session.endSession();
+      }
+    }
+
+    // DEPOSIT / WITHDRAWAL
     const accountRecord = await Account.findById(account);
 
     if (!accountRecord) {
@@ -23,32 +153,22 @@ const createTransaction = async (req, res, next) => {
       });
     }
 
-    // Validate amount
-    if (!amount || amount <= 0) {
-      return res.status(400).json({
-        message: 'Transaction amount must be greater than zero'
-      });
-    }
-
-    // Check withdrawal balance before creating transaction
-    if (type === 'WITHDRAWAL' && accountRecord.balance < amount) {
-      return res.status(400).json({
-        message: 'Insufficient account balance'
-      });
-    }
-
-    // Update account balance
     if (type === 'DEPOSIT') {
       accountRecord.balance += amount;
     }
 
     if (type === 'WITHDRAWAL') {
+      if (accountRecord.balance < amount) {
+        return res.status(400).json({
+          message: 'Insufficient account balance'
+        });
+      }
+
       accountRecord.balance -= amount;
     }
 
     await accountRecord.save();
 
-    // Create transaction
     const transaction = await Transaction.create({
       transactionId,
       account,
@@ -61,16 +181,19 @@ const createTransaction = async (req, res, next) => {
 
     const populatedTransaction = await Transaction
       .findById(transaction._id)
-      .populate('account');
+      .populate('account')
+      .populate('destinationAccount');
 
-    res.status(201).json({
+    return res.status(201).json({
       message: 'Transaction created successfully',
       transaction: populatedTransaction
     });
+
   } catch (error) {
     next(error);
   }
 };
+
 
 // Get all transactions
 const getTransactions = async (req, res, next) => {
@@ -78,20 +201,24 @@ const getTransactions = async (req, res, next) => {
     const transactions = await Transaction
       .find()
       .populate('account')
+      .populate('destinationAccount')
       .sort({ createdAt: -1 });
 
     res.status(200).json(transactions);
+
   } catch (error) {
     next(error);
   }
 };
+
 
 // Get transaction by ID
 const getTransactionById = async (req, res, next) => {
   try {
     const transaction = await Transaction
       .findById(req.params.id)
-      .populate('account');
+      .populate('account')
+      .populate('destinationAccount');
 
     if (!transaction) {
       return res.status(404).json({
@@ -100,10 +227,12 @@ const getTransactionById = async (req, res, next) => {
     }
 
     res.status(200).json(transaction);
+
   } catch (error) {
     next(error);
   }
 };
+
 
 module.exports = {
   createTransaction,
